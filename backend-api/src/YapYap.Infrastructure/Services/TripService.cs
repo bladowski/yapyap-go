@@ -223,6 +223,18 @@ public class TripService
         return response;
     }
 
+    public async Task SetStripePaymentIntentAsync(Guid tripId, string paymentIntentId)
+    {
+        var trip = await _db.Trips.FindAsync(tripId);
+        if (trip is null)
+            throw new InvalidOperationException("Trip not found.");
+
+        trip.StripePaymentIntentId = paymentIntentId;
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("Stripe PaymentIntent {Id} stored for trip {TripId}", paymentIntentId, tripId);
+    }
+
     public async Task<TripResponse> GetTripForUserAsync(Guid tripId, Guid userId)
     {
         var trip = await _db.Trips
@@ -274,7 +286,23 @@ public class TripService
                 break;
 
             case PaymentMethod.Stripe:
-                // Passenger pays platform via Stripe. Platform credits driver's share.
+                // Confirm the Stripe payment succeeded before crediting the driver.
+                if (string.IsNullOrEmpty(trip.StripePaymentIntentId))
+                {
+                    _logger.LogWarning(
+                        "Stripe trip {TripId} has no PaymentIntentId — skipping wallet credit", trip.Id);
+                    break;
+                }
+
+                var confirmation = await _paymentGateway.ConfirmPaymentAsync(trip.StripePaymentIntentId);
+                if (!confirmation.Succeeded)
+                {
+                    _logger.LogWarning(
+                        "Stripe payment {IntentId} for trip {TripId} not confirmed: {Reason}",
+                        trip.StripePaymentIntentId, trip.Id, confirmation.FailureReason ?? "unknown");
+                    break;
+                }
+
                 var driverShare = Math.Round(finalPrice * DriverShareRate, 0);
                 wallet.BalanceTzs += driverShare;
                 wallet.UpdatedAt = DateTime.UtcNow;

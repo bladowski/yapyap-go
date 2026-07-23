@@ -93,6 +93,7 @@ public class TripsController : ControllerBase
             return BadRequest(new { Error = "Trip has no estimated price." });
 
         var result = await _paymentGateway.CreatePaymentIntentAsync(tripId, price);
+        await _tripService.SetStripePaymentIntentAsync(tripId, result.PaymentIntentId);
         return Ok(result);
     }
 }

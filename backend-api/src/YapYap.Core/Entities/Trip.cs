@@ -17,6 +17,7 @@ public class Trip
     public decimal? EstimatedPrice { get; set; }
     public decimal? FinalPrice { get; set; }
     public PaymentMethod PaymentMethod { get; set; }
+    public string? StripePaymentIntentId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
 
