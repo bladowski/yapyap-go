@@ -56,6 +56,30 @@ public class DriversController : ControllerBase
     }
 
     /// <summary>
+    /// Get driver wallet balance. The X-User-Id header is verified against the driver's UserId.
+    /// </summary>
+    [HttpGet("{driverId:guid}/wallet")]
+    public async Task<ActionResult> GetWallet(
+        Guid driverId,
+        [FromHeader(Name = "X-User-Id")] Guid userId)
+    {
+        var driver = await _db.DriverProfiles.FindAsync(driverId);
+        if (driver is null) return NotFound();
+
+        if (driver.UserId != userId)
+            return Forbid();
+
+        var wallet = await _db.Wallets.FirstOrDefaultAsync(w => w.DriverId == driverId);
+
+        return Ok(new
+        {
+            walletId = wallet?.Id,
+            balanceTzs = wallet?.BalanceTzs ?? 0m,
+            driverId = driver.Id
+        });
+    }
+
+    /// <summary>
     /// Toggle online status. The X-User-Id header is verified against the driver's UserId
     /// to prevent impersonation.
     /// </summary>
