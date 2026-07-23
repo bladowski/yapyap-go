@@ -14,7 +14,11 @@ public class TripService
     private readonly YapYapDbContext _db;
     private readonly IMapService _mapService;
     private readonly ITripEventDispatcher _dispatcher;
+    private readonly IPaymentGatewayService _paymentGateway;
     private readonly ILogger<TripService> _logger;
+
+    private const decimal PlatformCommissionRate = 0.15m;
+    private const decimal DriverShareRate = 1m - PlatformCommissionRate; // 0.85
 
     private static readonly Dictionary<VehicleCategory, (decimal BaseFare, decimal PerKm, decimal PerMinute)> FareMatrix = new()
     {
@@ -30,11 +34,13 @@ public class TripService
         YapYapDbContext db,
         IMapService mapService,
         ITripEventDispatcher dispatcher,
+        IPaymentGatewayService paymentGateway,
         ILogger<TripService> logger)
     {
         _db = db;
         _mapService = mapService;
         _dispatcher = dispatcher;
+        _paymentGateway = paymentGateway;
         _logger = logger;
     }
 
@@ -186,6 +192,8 @@ public class TripService
 
             if (trip.Driver is not null)
                 trip.Driver.IsBusy = false;
+
+            await ProcessTripPaymentAsync(trip);
         }
 
         if (newStatus == TripStatus.Cancelled && trip.Driver is not null)
@@ -231,6 +239,88 @@ public class TripService
                 "Only the trip's passenger or assigned driver can view trip details.");
 
         return MapToResponse(trip);
+    }
+
+    private async Task ProcessTripPaymentAsync(Trip trip)
+    {
+        var finalPrice = trip.FinalPrice ?? trip.EstimatedPrice ?? 0m;
+        if (finalPrice <= 0 || trip.DriverId is null) return;
+
+        var wallet = await GetOrCreateWalletAsync(trip.DriverId.Value);
+
+        switch (trip.PaymentMethod)
+        {
+            case PaymentMethod.Cash:
+                // Passenger pays driver directly. Platform deducts commission from driver.
+                var commission = Math.Round(finalPrice * PlatformCommissionRate, 0);
+                wallet.BalanceTzs -= commission;
+                wallet.UpdatedAt = DateTime.UtcNow;
+
+                _db.WalletTransactions.Add(new WalletTransaction
+                {
+                    Id = Guid.NewGuid(),
+                    WalletId = wallet.Id,
+                    TripId = trip.Id,
+                    Type = WalletTransactionType.CommissionDeduction,
+                    AmountTzs = -commission,
+                    BalanceAfterTzs = wallet.BalanceTzs,
+                    Description = $"Commission on cash trip {trip.Id}",
+                    Timestamp = DateTime.UtcNow
+                });
+
+                _logger.LogInformation(
+                    "Cash trip {TripId}: deducted {Commission} TZS commission from driver {DriverId}",
+                    trip.Id, commission, trip.DriverId);
+                break;
+
+            case PaymentMethod.Stripe:
+                // Passenger pays platform via Stripe. Platform credits driver's share.
+                var driverShare = Math.Round(finalPrice * DriverShareRate, 0);
+                wallet.BalanceTzs += driverShare;
+                wallet.UpdatedAt = DateTime.UtcNow;
+
+                _db.WalletTransactions.Add(new WalletTransaction
+                {
+                    Id = Guid.NewGuid(),
+                    WalletId = wallet.Id,
+                    TripId = trip.Id,
+                    Type = WalletTransactionType.StripeFareCredit,
+                    AmountTzs = driverShare,
+                    BalanceAfterTzs = wallet.BalanceTzs,
+                    Description = $"Stripe fare credit for trip {trip.Id}",
+                    Timestamp = DateTime.UtcNow
+                });
+
+                _logger.LogInformation(
+                    "Stripe trip {TripId}: credited {Share} TZS to driver {DriverId}",
+                    trip.Id, driverShare, trip.DriverId);
+                break;
+
+            default:
+                _logger.LogWarning("Trip {TripId} completed with unsupported payment method {Method}",
+                    trip.Id, trip.PaymentMethod);
+                break;
+        }
+    }
+
+    private async Task<Wallet> GetOrCreateWalletAsync(Guid driverId)
+    {
+        var wallet = await _db.Wallets.FirstOrDefaultAsync(w => w.DriverId == driverId);
+
+        if (wallet is not null) return wallet;
+
+        wallet = new Wallet
+        {
+            Id = Guid.NewGuid(),
+            DriverId = driverId,
+            BalanceTzs = 0,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        _db.Wallets.Add(wallet);
+
+        _logger.LogInformation("Created wallet for driver {DriverId}", driverId);
+        return wallet;
     }
 
     private static TripResponse MapToResponse(Trip trip)

@@ -16,6 +16,8 @@ public class YapYapDbContext : DbContext
     public DbSet<Trip> Trips => Set<Trip>();
     public DbSet<TripEvent> TripEvents => Set<TripEvent>();
     public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<Wallet> Wallets => Set<Wallet>();
+    public DbSet<WalletTransaction> WalletTransactions => Set<WalletTransaction>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -29,6 +31,8 @@ public class YapYapDbContext : DbContext
         ConfigureTrip(builder);
         ConfigureTripEvent(builder);
         ConfigurePayment(builder);
+        ConfigureWallet(builder);
+        ConfigureWalletTransaction(builder);
     }
 
     private static void ConfigureUser(ModelBuilder builder)
@@ -189,5 +193,54 @@ public class YapYapDbContext : DbContext
             .WithOne(t => t.Payment)
             .HasForeignKey<Payment>(p => p.TripId)
             .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private static void ConfigureWallet(ModelBuilder builder)
+    {
+        var entity = builder.Entity<Wallet>();
+
+        entity.ToTable("wallets");
+
+        entity.HasKey(w => w.Id);
+        entity.HasIndex(w => w.DriverId).IsUnique();
+
+        entity.Property(w => w.BalanceTzs).HasPrecision(12, 2);
+        entity.Property(w => w.CreatedAt).HasDefaultValueSql("now() AT TIME ZONE 'utc'");
+        entity.Property(w => w.UpdatedAt).HasDefaultValueSql("now() AT TIME ZONE 'utc'");
+
+        entity.HasOne(w => w.Driver)
+            .WithOne()
+            .HasForeignKey<Wallet>(w => w.DriverId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private static void ConfigureWalletTransaction(ModelBuilder builder)
+    {
+        var entity = builder.Entity<WalletTransaction>();
+
+        entity.ToTable("wallet_transactions");
+
+        entity.HasKey(wt => wt.Id);
+        entity.HasIndex(wt => wt.WalletId);
+        entity.HasIndex(wt => wt.TripId);
+        entity.HasIndex(wt => wt.Timestamp);
+
+        entity.Property(wt => wt.AmountTzs).HasPrecision(12, 2);
+        entity.Property(wt => wt.BalanceAfterTzs).HasPrecision(12, 2);
+        entity.Property(wt => wt.Description).HasMaxLength(500);
+
+        entity.Property(wt => wt.Type)
+            .HasConversion<string>()
+            .HasMaxLength(30);
+
+        entity.HasOne(wt => wt.Wallet)
+            .WithMany(w => w.Transactions)
+            .HasForeignKey(wt => wt.WalletId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasOne(wt => wt.Trip)
+            .WithMany()
+            .HasForeignKey(wt => wt.TripId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

@@ -24,6 +24,7 @@ builder.Services.AddDbContext<YapYapDbContext>(options =>
 builder.Services.AddSingleton<ConnectionTracker>();
 builder.Services.AddScoped<IMapService, MockMapService>();
 builder.Services.AddScoped<ITripEventDispatcher, SignalRTripEventDispatcher>();
+builder.Services.AddScoped<IPaymentGatewayService, StripePaymentService>();
 builder.Services.AddScoped<TripService>();
 
 var app = builder.Build();

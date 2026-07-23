@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using YapYap.Core.DTOs;
+using YapYap.Core.Interfaces;
 using YapYap.Infrastructure.Services;
 
 namespace YapYap.Api.Controllers;
@@ -13,10 +14,12 @@ namespace YapYap.Api.Controllers;
 public class TripsController : ControllerBase
 {
     private readonly TripService _tripService;
+    private readonly IPaymentGatewayService _paymentGateway;
 
-    public TripsController(TripService tripService)
+    public TripsController(TripService tripService, IPaymentGatewayService paymentGateway)
     {
         _tripService = tripService;
+        _paymentGateway = paymentGateway;
     }
 
     /// <summary>Get a fare estimate before booking.</summary>
@@ -72,5 +75,24 @@ public class TripsController : ControllerBase
     {
         var trip = await _tripService.UpdateTripStatusAsync(tripId, request.NewStatus, userId);
         return Ok(trip);
+    }
+
+    /// <summary>
+    /// Create a Stripe PaymentIntent for a trip. The returned ClientSecret is used
+    /// by the mobile Stripe SDK to confirm the payment on-device.
+    /// </summary>
+    [HttpPost("{tripId:guid}/stripe/payment-intent")]
+    public async Task<ActionResult<PaymentIntentResult>> CreateStripePaymentIntent(
+        Guid tripId,
+        [FromHeader(Name = "X-User-Id")] Guid userId)
+    {
+        var trip = await _tripService.GetTripForUserAsync(tripId, userId);
+
+        var price = trip.EstimatedPriceTzs ?? 0m;
+        if (price <= 0)
+            return BadRequest(new { Error = "Trip has no estimated price." });
+
+        var result = await _paymentGateway.CreatePaymentIntentAsync(tripId, price);
+        return Ok(result);
     }
 }
