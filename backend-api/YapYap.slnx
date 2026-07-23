@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/YapYap.Api/YapYap.Api.csproj" />
+    <Project Path="src/YapYap.Core/YapYap.Core.csproj" />
+    <Project Path="src/YapYap.Infrastructure/YapYap.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/YapYap.Api.Tests/YapYap.Api.Tests.csproj" />
+  </Folder>
+</Solution>

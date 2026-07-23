@@ -1,0 +1,32 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+.vs/
+*.DotSettings.user
+
+# Node / Web
+node_modules/
+dist/
+.env
+.env.local
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+*.iml
+.idea/
+.metadata
+
+# Docker
+pgdata/
+
+# OS
+.DS_Store
+Thumbs.db
