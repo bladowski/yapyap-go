@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
@@ -5,6 +6,7 @@ import 'package:yapyap_driver/core/signalr_service.dart';
 import 'package:yapyap_driver/models/driver_state.dart';
 import 'package:yapyap_driver/providers/app_providers.dart';
 import 'package:yapyap_driver/providers/driver_state_controller.dart';
+import 'package:yapyap_driver/screens/active_trip_panel.dart';
 import 'package:yapyap_driver/screens/incoming_ride_dialog.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -15,9 +17,14 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  MapboxMap? _mapboxMap;
+
   static const _defaultCenter = Point(
     coordinates: Position(-6.1659, 39.1990),
   );
+
+  static const _routeSourceId = 'active-route-source';
+  static const _routeLayerId = 'active-route-layer';
 
   @override
   void initState() {
@@ -27,6 +34,61 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _connectSignalR() async {
     await ref.read(signalRProvider).connect();
+  }
+
+  void _onMapCreated(MapboxMap map) {
+    _mapboxMap = map;
+  }
+
+  void _updateRouteLine(ActiveTrip? trip) {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    final style = map.style;
+
+    if (trip == null) {
+      _removeRouteLine(style);
+      return;
+    }
+
+    final driverLat = -6.1659; // MVP: hardcoded driver position
+    final driverLng = 39.1990;
+
+    final geojson = {
+      'type': 'Feature',
+      'geometry': {
+        'type': 'LineString',
+        'coordinates': [
+          [driverLng, driverLat],
+          [trip.targetLng, trip.targetLat],
+        ],
+      },
+    };
+
+    // Remove old source/layer if exists, then add new.
+    _removeRouteLine(style);
+
+    style.addSource(GeoJsonSource(
+      id: _routeSourceId,
+      data: jsonEncode(geojson),
+    ));
+
+    style.addLayer(LineLayer(
+      id: _routeLayerId,
+      sourceId: _routeSourceId,
+      lineColor: Colors.blue.value,
+      lineWidth: 4.0,
+      lineOpacity: 0.8,
+    ));
+  }
+
+  void _removeRouteLine(StyleManager style) {
+    try {
+      style.removeStyleLayer(_routeLayerId);
+    } catch (_) {}
+    try {
+      style.removeStyleSource(_routeSourceId);
+    } catch (_) {}
   }
 
   @override
@@ -59,6 +121,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       });
     }
 
+    // Show trip completed snackbar.
+    ref.listen<DriverState>(driverStateProvider, (prev, next) {
+      if (prev.activeTrip != null &&
+          next.activeTrip == null &&
+          prev.activeTrip!.status == 'InProgress') {
+        final price = prev.activeTrip!.estimatedPriceTzs ?? 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Trip completed! ${price.toStringAsFixed(0)} TZS — wallet updated.'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    });
+
+    // Update route line when active trip changes.
+    final activeTrip = state.activeTrip;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateRouteLine(activeTrip);
+    });
+
     return Scaffold(
       body: Stack(
         children: [
@@ -71,6 +156,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             resourceOptions: const ResourceOptions(
               accessToken: 'YOUR_MAPBOX_TOKEN_HERE',
             ),
+            onMapCreated: _onMapCreated,
           ),
           // Wallet balance card
           Positioned(
@@ -81,53 +167,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      bottomSheet: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        child: SafeArea(
-          child: SizedBox(
-            width: double.infinity,
-            height: 56,
-            child: ElevatedButton(
-              onPressed: state.isLoading ? null : () => controller.toggleOnline(),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: state.isOnline ? Colors.red : const Color(0xFF00B341),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
+      bottomSheet: state.activeTrip != null
+          ? const ActiveTripPanel()
+          : Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
               ),
-              child: state.isLoading
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Text(
-                      state.isOnline ? 'GO OFFLINE' : 'GO ONLINE',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.2,
+              child: SafeArea(
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: state.isLoading
+                        ? null
+                        : () => controller.toggleOnline(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: state.isOnline
+                          ? Colors.red
+                          : const Color(0xFF00B341),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
                     ),
+                    child: state.isLoading
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            state.isOnline ? 'GO OFFLINE' : 'GO ONLINE',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      ),
     );
   }
 

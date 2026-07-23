@@ -29,25 +29,33 @@ class DriverStateController extends StateNotifier<DriverState> {
       try {
         final data = jsonDecode(event) as Map<String, dynamic>;
         final status = data['status'] as String?;
+        final eventTripId = data['tripId'] as String?;
 
-        // When a trip is accepted (assigned to this driver), it arrives via TripHub.
-        // The driver receives the trip request before accepting.
-        // For MVP: listen for any trip where status is Requested — in production,
-        // the backend would broadcast ride requests to nearby drivers.
-        if (status == 'Requested' || status == 'DriverAssigned') {
-          final trip = IncomingTrip(
-            tripId: data['tripId'] as String,
-            passengerName: data['driverName'] as String? ?? 'Passenger',
-            category: data['vehicleDescription'] as String? ?? 'Unknown',
-            estimatedPriceTzs:
-                (data['estimatedPriceTzs'] as num?)?.toDouble(),
-            pickupLat: 0, // Backend doesn't send coords in trip event yet
-            pickupLng: 0,
-            dropoffLat: 0,
-            dropoffLng: 0,
-            pickupAddress: null,
+        if (status == 'Requested') {
+          state = state.copyWith(
+            incomingTrip: IncomingTrip(
+              tripId: data['tripId'] as String,
+              passengerName: 'Passenger',
+              category: data['vehicleDescription'] as String? ?? 'Unknown',
+              estimatedPriceTzs:
+                  (data['estimatedPriceTzs'] as num?)?.toDouble(),
+              pickupLat: -6.1659,
+              pickupLng: 39.1990,
+              dropoffLat: -6.1300,
+              dropoffLng: 39.2200,
+            ),
           );
-          state = state.copyWith(incomingTrip: trip);
+        }
+
+        // If an active trip's status changed via another party, sync it.
+        if (eventTripId == state.activeTrip?.tripId && status != null) {
+          state = state.copyWith(
+            activeTrip: state.activeTrip!.copyWith(status: status),
+          );
+
+          if (status == 'Completed') {
+            _onTripCompleted();
+          }
         }
       } catch (_) {}
     });
@@ -63,8 +71,6 @@ class DriverStateController extends StateNotifier<DriverState> {
 
   Future<void> _goOnline() async {
     state = state.copyWith(isLoading: true, clearError: true);
-
-    // Refresh wallet before online check.
     final balance = await _api.getWalletBalance();
 
     if (balance < 0) {
@@ -81,7 +87,8 @@ class DriverStateController extends StateNotifier<DriverState> {
     try {
       await _api.setOnlineStatus(true);
       await _locationTracker.start();
-      state = state.copyWith(isOnline: true, walletBalance: balance, isLoading: false);
+      state = state.copyWith(
+          isOnline: true, walletBalance: balance, isLoading: false);
     } catch (e) {
       state = state.copyWith(
         isLoading: false,
@@ -106,15 +113,65 @@ class DriverStateController extends StateNotifier<DriverState> {
 
   Future<void> acceptTrip(String tripId) async {
     try {
-      await _api.acceptTrip(tripId);
-      state = state.copyWith(clearTrip: true);
+      final result = await _api.acceptTrip(tripId);
+      final activeTrip = ActiveTrip(
+        tripId: result['tripId'] as String,
+        passengerName: (result['driverName'] as String?) ?? 'Passenger',
+        category: (result['vehicleDescription'] as String?) ?? 'Unknown',
+        estimatedPriceTzs:
+            (result['estimatedPriceTzs'] as num?)?.toDouble(),
+        status: result['status'] as String? ?? 'DriverAssigned',
+        pickupLat: state.incomingTrip?.pickupLat ?? -6.1659,
+        pickupLng: state.incomingTrip?.pickupLng ?? 39.1990,
+        dropoffLat: state.incomingTrip?.dropoffLat ?? -6.1300,
+        dropoffLng: state.incomingTrip?.dropoffLng ?? 39.2200,
+        pickupAddress: state.incomingTrip?.pickupAddress,
+      );
+      state = state.copyWith(
+        activeTrip: activeTrip,
+        clearIncomingTrip: true,
+      );
     } catch (e) {
       state = state.copyWith(errorMessage: 'Failed to accept trip: $e');
     }
   }
 
   void dismissTrip() {
-    state = state.copyWith(clearTrip: true);
+    state = state.copyWith(clearIncomingTrip: true);
+  }
+
+  /// Advance the active trip to the next status.
+  Future<void> advanceTripStatus() async {
+    final trip = state.activeTrip;
+    if (trip == null) return;
+
+    final next = trip.nextStatus;
+    if (next == trip.status) return;
+
+    state = state.copyWith(isLoading: true);
+
+    try {
+      await _api.updateTripStatus(trip.tripId, next);
+      state = state.copyWith(
+        activeTrip: trip.copyWith(status: next),
+        isLoading: false,
+      );
+
+      if (next == 'Completed') {
+        _onTripCompleted();
+      }
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: 'Failed to update trip: $e',
+      );
+    }
+  }
+
+  void _onTripCompleted() {
+    // Refresh wallet — backend just applied commission/credit.
+    _loadWallet();
+    state = state.copyWith(clearActiveTrip: true);
   }
 
   void clearError() {

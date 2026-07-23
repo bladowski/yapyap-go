@@ -50,4 +50,13 @@ class ApiClient {
     final response = await dio.post('/api/v1/trips/$tripId/accept');
     return response.data as Map<String, dynamic>;
   }
+
+  Future<Map<String, dynamic>> updateTripStatus(
+      String tripId, String newStatus) async {
+    final response = await dio.post(
+      '/api/v1/trips/$tripId/status',
+      data: {'newStatus': newStatus},
+    );
+    return response.data as Map<String, dynamic>;
+  }
 }
