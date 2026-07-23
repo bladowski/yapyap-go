@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:yapyap_passenger/providers/app_providers.dart';
+import 'package:yapyap_passenger/providers/ride_request_controller.dart';
+import 'package:yapyap_passenger/screens/ride_request_sheet.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -54,8 +56,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _onRequestRide() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ride request — coming next sprint')),
+    ref.read(rideRequestProvider.notifier).reset();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => const RideRequestBottomSheet(),
     );
   }
 

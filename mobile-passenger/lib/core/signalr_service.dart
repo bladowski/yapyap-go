@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:signalr_core/signalr_core.dart';
 
 class SignalRService {
@@ -6,6 +8,16 @@ class SignalRService {
 
   HubConnection? _tripHub;
   HubConnection? _locationHub;
+
+  final _tripEventController = StreamController<String>.broadcast();
+  final _driverLocationController = StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Broadcast stream of raw JSON trip event payloads.
+  Stream<String> get tripEventStream => _tripEventController.stream;
+
+  /// Broadcast stream of parsed driver location updates.
+  Stream<Map<String, dynamic>> get driverLocationStream =>
+      _driverLocationController.stream;
 
   HubConnection get tripHub => _tripHub!;
   HubConnection get locationHub => _locationHub!;
@@ -33,6 +45,10 @@ class SignalRService {
       print('LocationHub closed: $error');
     });
 
+    _tripHub!.on('TripAccepted', _onTripEvent);
+    _tripHub!.on('TripUpdated', _onTripEvent);
+    _locationHub!.on('DriverLocationUpdated', _onDriverLocation);
+
     await _tripHub!.start();
     await _locationHub!.start();
 
@@ -41,18 +57,29 @@ class SignalRService {
     }
   }
 
-  /// Listen for trip events (TripAccepted, TripUpdated).
-  void onTripEvent(String method, void Function(List<Object?>?) handler) {
-    _tripHub?.on(method, handler);
+  void _onTripEvent(List<Object?>? args) {
+    if (args?.isNotEmpty == true && args!.first is String) {
+      _tripEventController.add(args.first as String);
+    } else if (args?.isNotEmpty == true) {
+      _tripEventController.add(jsonEncode(args!.first));
+    }
   }
 
-  /// Listen for live driver location updates.
-  void onDriverLocation(void Function(List<Object?>?) handler) {
-    _locationHub?.on('DriverLocationUpdated', handler);
+  void _onDriverLocation(List<Object?>? args) {
+    if (args?.isNotEmpty == true && args!.first is Map) {
+      _driverLocationController.add(args.first as Map<String, dynamic>);
+    } else if (args?.isNotEmpty == true) {
+      try {
+        final map = jsonDecode(args!.first.toString()) as Map<String, dynamic>;
+        _driverLocationController.add(map);
+      } catch (_) {}
+    }
   }
 
   Future<void> disconnect() async {
     await _tripHub?.stop();
     await _locationHub?.stop();
+    await _tripEventController.close();
+    await _driverLocationController.close();
   }
 }
