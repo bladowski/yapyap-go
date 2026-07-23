@@ -4,6 +4,10 @@ using YapYap.Infrastructure.Services;
 
 namespace YapYap.Api.Controllers;
 
+// SECURITY: The X-User-Id header pattern is an MVP placeholder.
+// Post-MVP, replace with JWT bearer auth: [Authorize] + User.FindFirstValue(ClaimTypes.NameIdentifier).
+// See hubs and DriversController for the same pattern.
+
 [ApiController]
 [Route("api/v1/trips")]
 public class TripsController : ControllerBase
@@ -36,25 +40,30 @@ public class TripsController : ControllerBase
         return CreatedAtAction(nameof(GetTrip), new { tripId = trip.TripId }, trip);
     }
 
-    /// <summary>Get trip details by ID.</summary>
+    /// <summary>Get trip details by ID. Caller must be a participant.</summary>
     [HttpGet("{tripId:guid}")]
-    public async Task<ActionResult> GetTrip(Guid tripId)
-    {
-        // Simple endpoint — full trip history will be added post-MVP.
-        return Ok(new { TripId = tripId, Message = "Use SignalR for real-time trip updates." });
-    }
-
-    /// <summary>Driver accepts a trip. Pass driverId in request body.</summary>
-    [HttpPost("{tripId:guid}/accept")]
-    public async Task<ActionResult<TripResponse>> AcceptTrip(
+    public async Task<ActionResult> GetTrip(
         Guid tripId,
-        [FromBody] AcceptTripRequest request)
+        [FromHeader(Name = "X-User-Id")] Guid userId)
     {
-        var trip = await _tripService.AcceptTripAsync(tripId, request.DriverId);
+        var trip = await _tripService.GetTripForUserAsync(tripId, userId);
         return Ok(trip);
     }
 
-    /// <summary>Update trip status (DriverArrived, InProgress, Completed, Cancelled).</summary>
+    /// <summary>
+    /// Driver accepts a trip. The driver's identity is derived from the X-User-Id header,
+    /// not from a spoofable request body field.
+    /// </summary>
+    [HttpPost("{tripId:guid}/accept")]
+    public async Task<ActionResult<TripResponse>> AcceptTrip(
+        Guid tripId,
+        [FromHeader(Name = "X-User-Id")] Guid driverUserId)
+    {
+        var trip = await _tripService.AcceptTripAsync(tripId, driverUserId);
+        return Ok(trip);
+    }
+
+    /// <summary>Update trip status. Caller must be a participant; role-based transitions enforced.</summary>
     [HttpPost("{tripId:guid}/status")]
     public async Task<ActionResult<TripResponse>> UpdateStatus(
         Guid tripId,

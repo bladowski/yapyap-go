@@ -6,6 +6,10 @@ using YapYap.Infrastructure.Services;
 
 namespace YapYap.Api.Hubs;
 
+// SECURITY: The userId parameter in RegisterDriverAsync and SendLocationUpdateAsync is an MVP
+// placeholder. Post-MVP, replace with [Authorize] + Context.UserIdentifier from JWT bearer auth.
+// The same pattern applies to TripHub.RegisterAsync.
+
 public class DriverLocationHub : Hub
 {
     private readonly YapYapDbContext _db;

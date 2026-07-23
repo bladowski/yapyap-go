@@ -93,7 +93,11 @@ public class TripService
         return MapToResponse(trip);
     }
 
-    public async Task<TripResponse> AcceptTripAsync(Guid tripId, Guid driverId)
+    /// <summary>
+    /// Accept a trip. driverUserId is the authenticated user's ID (from auth token/header),
+    /// NOT an arbitrary driver profile ID from the request body.
+    /// </summary>
+    public async Task<TripResponse> AcceptTripAsync(Guid tripId, Guid driverUserId)
     {
         var trip = await _db.Trips
             .Include(t => t.Passenger)
@@ -105,13 +109,14 @@ public class TripService
         if (trip.Status != TripStatus.Requested)
             throw new InvalidOperationException($"Trip cannot be accepted. Current status: {trip.Status}.");
 
+        // Derive driver profile from authenticated user ID, not from request body.
         var driver = await _db.DriverProfiles
             .Include(d => d.User)
             .Include(d => d.Vehicle)
-            .FirstOrDefaultAsync(d => d.Id == driverId);
+            .FirstOrDefaultAsync(d => d.UserId == driverUserId);
 
         if (driver is null)
-            throw new InvalidOperationException("Driver not found.");
+            throw new InvalidOperationException("Driver profile not found for this user.");
 
         if (driver.IsBusy)
             throw new InvalidOperationException("Driver is already on a trip.");
@@ -122,7 +127,8 @@ public class TripService
 
         await _db.SaveChangesAsync();
 
-        _logger.LogInformation("Trip {TripId} accepted by driver {DriverId}", tripId, driverId);
+        _logger.LogInformation("Trip {TripId} accepted by driver {DriverId} (userId {UserId})",
+            tripId, driver.Id, driverUserId);
 
         var response = MapToResponse(trip);
 
@@ -142,20 +148,33 @@ public class TripService
         if (trip is null)
             throw new InvalidOperationException("Trip not found.");
 
-        var allowed = (trip.Status, newStatus) switch
+        // Verify the triggering user is a trip participant.
+        var isPassenger = trip.PassengerId == triggeredByUserId;
+        var isDriver = trip.Driver?.UserId == triggeredByUserId;
+
+        if (!isPassenger && !isDriver)
+            throw new UnauthorizedAccessException(
+                "Only the trip's passenger or assigned driver can update trip status.");
+
+        // Enforce role-specific transition rules.
+        var allowed = (trip.Status, newStatus, isDriver, isPassenger) switch
         {
-            (TripStatus.DriverAssigned, TripStatus.DriverArrived) => true,
-            (TripStatus.DriverArrived, TripStatus.InProgress) => true,
-            (TripStatus.InProgress, TripStatus.Completed) => true,
-            (TripStatus.Requested, TripStatus.Cancelled) => true,
-            (TripStatus.DriverAssigned, TripStatus.Cancelled) => true,
-            (TripStatus.DriverArrived, TripStatus.Cancelled) => true,
+            // Driver-only transitions
+            (TripStatus.DriverAssigned, TripStatus.DriverArrived, true, _) => true,
+            (TripStatus.DriverArrived, TripStatus.InProgress, true, _) => true,
+            (TripStatus.InProgress, TripStatus.Completed, true, _) => true,
+
+            // Either party can cancel (before trip starts)
+            (TripStatus.Requested, TripStatus.Cancelled, _, true) => true,
+            (TripStatus.DriverAssigned, TripStatus.Cancelled, _, _) => true,
+            (TripStatus.DriverArrived, TripStatus.Cancelled, _, _) => true,
+
             _ => false
         };
 
         if (!allowed)
             throw new InvalidOperationException(
-                $"Invalid state transition: {trip.Status} → {newStatus}.");
+                $"Invalid state transition: {trip.Status} → {newStatus} by {(isDriver ? "driver" : "passenger")}.");
 
         var previousStatus = trip.Status;
         trip.Status = newStatus;
@@ -194,6 +213,24 @@ public class TripService
             await _dispatcher.SendToUserAsync(driverUserId, "TripUpdated", response);
 
         return response;
+    }
+
+    public async Task<TripResponse> GetTripForUserAsync(Guid tripId, Guid userId)
+    {
+        var trip = await _db.Trips
+            .Include(t => t.Passenger)
+            .Include(t => t.Driver!).ThenInclude(d => d.User)
+            .Include(t => t.Driver!).ThenInclude(d => d.Vehicle)
+            .FirstOrDefaultAsync(t => t.Id == tripId);
+
+        if (trip is null)
+            throw new InvalidOperationException("Trip not found.");
+
+        if (trip.PassengerId != userId && trip.Driver?.UserId != userId)
+            throw new UnauthorizedAccessException(
+                "Only the trip's passenger or assigned driver can view trip details.");
+
+        return MapToResponse(trip);
     }
 
     private static TripResponse MapToResponse(Trip trip)

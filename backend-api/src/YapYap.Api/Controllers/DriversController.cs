@@ -55,12 +55,21 @@ public class DriversController : ControllerBase
         return Ok(drivers);
     }
 
-    /// <summary>Simple online status toggle (for testing).</summary>
+    /// <summary>
+    /// Toggle online status. The X-User-Id header is verified against the driver's UserId
+    /// to prevent impersonation.
+    /// </summary>
     [HttpPost("{driverId:guid}/online")]
-    public async Task<ActionResult> SetOnline(Guid driverId, [FromQuery] bool online = true)
+    public async Task<ActionResult> SetOnline(
+        Guid driverId,
+        [FromHeader(Name = "X-User-Id")] Guid userId,
+        [FromQuery] bool online = true)
     {
         var driver = await _db.DriverProfiles.FindAsync(driverId);
         if (driver is null) return NotFound();
+
+        if (driver.UserId != userId)
+            return Forbid();
 
         driver.IsOnline = online;
         await _db.SaveChangesAsync();

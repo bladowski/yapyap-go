@@ -3,6 +3,9 @@ using YapYap.Infrastructure.Services;
 
 namespace YapYap.Api.Hubs;
 
+// SECURITY: The userId parameter in RegisterAsync is an MVP placeholder.
+// Post-MVP, replace with [Authorize] + Context.UserIdentifier from JWT bearer auth.
+
 /// <summary>
 /// Hub for trip state change events. Passengers and drivers connect here
 /// to receive real-time trip updates (accepted, arrived, started, completed, cancelled).
