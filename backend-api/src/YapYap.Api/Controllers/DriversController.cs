@@ -6,6 +6,13 @@ using YapYap.Infrastructure.Data;
 
 namespace YapYap.Api.Controllers;
 
+// SECURITY: The X-User-Id header pattern is an MVP placeholder — same pattern as
+// TripsController and all SignalR hubs. Post-MVP, replace with JWT bearer auth:
+// [Authorize] + User.FindFirstValue(ClaimTypes.NameIdentifier).
+// The GetWallet and SetOnline endpoints already enforce driver.UserId == userId
+// as an IDOR guard; spoofing the header alone is insufficient without knowing
+// the correct userId→driverId mapping.
+
 [ApiController]
 [Route("api/v1/drivers")]
 public class DriversController : ControllerBase
