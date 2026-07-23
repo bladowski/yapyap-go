@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:signalr_core/signalr_core.dart';
 
 class SignalRService {
-  static const _baseUrl = 'http://10.0.2.2:5180';
+  static const _baseUrl = 'http://192.168.88.104:5180';
   static const _passengerUserId = 'eca1143b-5cae-4867-ab85-403909324899';
 
   HubConnection? _tripHub;

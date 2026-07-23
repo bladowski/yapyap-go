@@ -5,7 +5,7 @@ class ApiClient {
   static const _passengerUserId = 'eca1143b-5cae-4867-ab85-403909324899';
 
   // Use 10.0.2.2 for Android emulator, localhost for iOS simulator.
-  static const baseUrl = 'http://10.0.2.2:5180';
+  static const baseUrl = 'http://192.168.88.104:5180';
 
   late final Dio dio;
 

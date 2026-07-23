@@ -5,7 +5,7 @@ class ApiClient {
   static const _driverUserId = '701f5316-3fa9-4a78-9d95-207d10dfa211';
   static const _driverProfileId = '7a58af30-82b7-425d-ba8a-efa4dd8a617e';
 
-  static const baseUrl = 'http://10.0.2.2:5180';
+  static const baseUrl = 'http://192.168.88.104:5180';
 
   late final Dio dio;
 
